@@ -99,7 +99,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # 4. Use the parsed path to load data
-    print(f"✅ Loading data from: {args.data_path}")
+    print(f" Loading data from: {args.data_path}")
     train_dataset = Prostate3DDataset(root_dir=args.data_path, split="train")
     
     if len(train_dataset) > 0:

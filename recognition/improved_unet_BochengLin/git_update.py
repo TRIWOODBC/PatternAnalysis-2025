@@ -7,11 +7,11 @@ REMOTE = "origin"
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 # Show status
-print("🔄 Git Status:")
+print(" Git Status:")
 os.system("git status")
 
 # Get commit message
-msg = input("\n📝 Commit message: ").strip()
+msg = input("\n Commit message: ").strip()
 if not msg:
     msg = "Update"
 
