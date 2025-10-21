@@ -8,7 +8,28 @@ This project implements a 6-class 3D segmenntation on the prostate 3D MRI datase
 
 ## 2. Algorithm Description
 
-This project implements a 3D improved U-Net architecture for semantic segmentation on 3D medical imaging data.
+Uses a 3D U-Net architecture with the following improvements:
+
+- **Encoder-Decoder with Skip Connections**: Standard U-Net structure but with strided convolutions (Conv3d stride=2) instead of max-pooling for downsampling
+- **Instance Norm**: Works better than batch norm when batch size is small (4 in this case)
+- **LeakyReLU**: Better gradient flow compared to ReLU
+- **Dice Loss**: Optimizes directly for segmentation IoU, handles class imbalance well
+- **6-class Output**: Background + 5 tissue classes
+
+### Model Details
+
+Encoder: 5 levels (1 → 64 → 128 → 256 → 320 channels)
+Decoder: 4 levels with symmetric upsampling and skip connections
+Total: ~17.5M parameters
+
+### Training Setup
+
+- Optimizer: Adam (lr=1e-4, weight_decay=1e-5)
+- Loss: Dice Loss
+- Learning rate: Reduce by 0.5× if validation Dice doesn't improve for 5 epochs
+- Batch size: 4
+- Data split: 80% train / 10% val / 10% test
+- Early stopping: None (run full 100 epochs)
 
 ### Project Structure
 
