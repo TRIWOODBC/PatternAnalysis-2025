@@ -1,5 +1,13 @@
 ## Improved 3D U-Net for Prostate MRI Segmentation
 
+**Author**: Bocheng Lin 48275565
+**Project**: COMP3710 Pattern Analysis Report - Project 7 (Hard Difficulty)
+
+## 1. Problem Description
+This project implements a 6-class 3D segmenntation on the prostate 3D MRI dataset using an Improved UNet3D model. The goal is to achieve Dice >= 0.70 on all foreground classes.
+
+## 2. Algorithm Description
+
 This project implements a 3D improved U-Net architecture for semantic segmentation on 3D medical imaging data.
 
 ### Project Structure
