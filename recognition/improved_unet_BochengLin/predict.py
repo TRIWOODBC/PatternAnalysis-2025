@@ -10,7 +10,7 @@ from modules import UNet3D_Improved
 
 
 def evaluate(model, test_loader, device, num_classes=6):
-    """Evaluate model on test set and compute per-class Dice scores."""
+    """Evaluate model and compute per-class Dice coefficients."""
     model.eval()
     all_dice_scores = {c: [] for c in range(num_classes)}
     
@@ -23,7 +23,6 @@ def evaluate(model, test_loader, device, num_classes=6):
             outputs = model(images)
             preds = torch.argmax(outputs, dim=1, keepdim=True)
             
-            # Compute per-class Dice
             for c in range(num_classes):
                 pred_c = (preds == c).float()
                 target_c = (labels == c).float()
@@ -42,6 +41,7 @@ def evaluate(model, test_loader, device, num_classes=6):
 
 
 def main(args):
+    """Load model and evaluate on test set."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
@@ -51,7 +51,7 @@ def main(args):
     model = model.to(device)
     print(f"Loaded model from {args.model_path}")
     
-    # Load test dataset
+    # Load test set
     test_dataset = Prostate3DDataset(root_dir=args.data_path, split="test")
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
     print(f"Test samples: {len(test_dataset)}")

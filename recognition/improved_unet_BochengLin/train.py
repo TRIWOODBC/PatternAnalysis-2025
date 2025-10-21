@@ -12,14 +12,14 @@ from modules import UNet3D_Improved
 
 
 class DiceLoss(nn.Module):
+    """Dice Loss for multi-class segmentation."""
     def __init__(self, smooth=1.0, num_classes=6):
         super(DiceLoss, self).__init__()
         self.smooth = smooth
         self.num_classes = num_classes
 
     def forward(self, pred, target):
-        # pred: (B, C, H, W, D)
-        # target: (B, 1, H, W, D) with class indices
+        """pred: (B, C, H, W, D), target: (B, 1, H, W, D)"""
         target_one_hot = torch.zeros_like(pred)
         for c in range(self.num_classes):
             target_one_hot[:, c] = (target.squeeze(1) == c).float()
@@ -32,13 +32,13 @@ class DiceLoss(nn.Module):
 
 
 class DiceCoefficient:
+    """Compute Dice coefficient for validation."""
     def __init__(self, smooth=1.0, num_classes=6):
         self.smooth = smooth
         self.num_classes = num_classes
 
     def compute(self, pred, target):
-        # pred: (B, C, H, W, D)
-        # target: (B, 1, H, W, D) with class indices
+        """pred: (B, C, H, W, D), target: (B, 1, H, W, D)"""
         pred = torch.argmax(pred, dim=1, keepdim=True)
         dice_scores = []
         
@@ -57,6 +57,7 @@ class DiceCoefficient:
 
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
+    """Train one epoch."""
     model.train()
     total_loss = 0.0
     pbar = tqdm(train_loader, desc="Training", ncols=100)
@@ -79,6 +80,7 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
 
 
 def validate(model, val_loader, criterion, device):
+    """Validate on val set and return loss and Dice."""
     model.eval()
     total_loss = 0.0
     dice_metric = DiceCoefficient(num_classes=6)
@@ -110,6 +112,17 @@ def validate(model, val_loader, criterion, device):
 
 
 def main(args):
+    """
+    Train 3D U-Net model for prostate MRI segmentation.
+    
+    Training workflow:
+    1. Initialize model and move to device (CPU/GPU)
+    2. Setup Dice loss and Adam optimizer
+    3. Load train/val datasets
+    4. Train for specified epochs with validation
+    5. Save best model based on validation Dice
+    6. Use learning rate scheduling to adjust learning rate
+    """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     

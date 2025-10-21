@@ -11,7 +11,10 @@ from modules import UNet3D_Improved
 
 
 def visualize_segmentation(model, test_loader, device, num_samples=3, save_dir=None):
-    """Generate visualization of segmentation results."""
+    """
+    Generate and save segmentation visualization images.
+    Shows side-by-side comparison of input, ground truth, and predictions.
+    """
     
     if save_dir is None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -39,26 +42,27 @@ def visualize_segmentation(model, test_loader, device, num_samples=3, save_dir=N
                 if sample_count >= num_samples:
                     break
                 
-                # Get middle slice
+                # Extract middle slice for visualization
                 image = images[b, 0].cpu().numpy()
                 label = labels[b, 0].cpu().numpy()
                 pred = preds[b].cpu().numpy()
                 
                 mid_z = image.shape[2] // 2
                 
+                # Create comparison figure
                 fig, axes = plt.subplots(1, 3, figsize=(15, 4))
                 
-                # Original image
+                # Input image
                 axes[0].imshow(image[:, :, mid_z], cmap='gray')
                 axes[0].set_title('Input Image (Middle Slice)')
                 axes[0].axis('off')
                 
-                # Ground truth
+                # Ground truth labels
                 im1 = axes[1].imshow(label[:, :, mid_z], cmap='tab10', vmin=0, vmax=9)
                 axes[1].set_title('Ground Truth Label')
                 axes[1].axis('off')
                 
-                # Prediction
+                # Model prediction
                 im2 = axes[2].imshow(pred[:, :, mid_z], cmap='tab10', vmin=0, vmax=9)
                 axes[2].set_title('Model Prediction')
                 axes[2].axis('off')
@@ -73,7 +77,7 @@ def visualize_segmentation(model, test_loader, device, num_samples=3, save_dir=N
 
 
 def compute_metrics(model, test_loader, device, num_classes=6):
-    """Compute per-class Dice scores."""
+    """Compute Dice coefficient for each class on test set."""
     model.eval()
     all_dice_scores = {c: [] for c in range(num_classes)}
     
@@ -85,6 +89,7 @@ def compute_metrics(model, test_loader, device, num_classes=6):
             outputs = model(images)
             preds = torch.argmax(outputs, dim=1, keepdim=True)
             
+            # Calculate Dice for each class
             for c in range(num_classes):
                 pred_c = (preds == c).float()
                 target_c = (labels == c).float()
@@ -103,7 +108,7 @@ def compute_metrics(model, test_loader, device, num_classes=6):
 
 
 def plot_metrics(all_dice_scores, save_dir=None):
-    """Plot per-class Dice scores."""
+    """Generate and save Dice score bar chart."""
     
     if save_dir is None:
         script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -118,7 +123,7 @@ def plot_metrics(all_dice_scores, save_dir=None):
     fig, ax = plt.subplots(figsize=(10, 6))
     bars = ax.bar(classes, mean_dices, color='skyblue', edgecolor='navy', alpha=0.7)
     
-    # Add value labels on bars
+    # Add value labels on each bar
     for i, (c, dice) in enumerate(zip(classes, mean_dices)):
         ax.text(i, dice + 0.02, f'{dice:.3f}', ha='center', va='bottom', fontsize=10)
     
@@ -138,13 +143,16 @@ def plot_metrics(all_dice_scores, save_dir=None):
 
 
 def main(args):
+    """Generate segmentation visualizations and performance metrics."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # Create results directory
+    # Create results directory if needed
+    if args.save_dir is None:
+        args.save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results")
     os.makedirs(args.save_dir, exist_ok=True)
     
-    # Load model
+    # Load trained model
     model = UNet3D_Improved(in_channels=1, num_classes=6)
     model.load_state_dict(torch.load(args.model_path, map_location=device))
     model = model.to(device)
@@ -159,7 +167,7 @@ def main(args):
     # Generate segmentation visualizations
     visualize_segmentation(model, test_loader, device, args.num_samples, args.save_dir)
     
-    # Compute and plot metrics
+    # Compute and plot Dice metrics
     print("Computing per-class Dice scores...")
     all_dice_scores = compute_metrics(model, test_loader, device, num_classes=6)
     plot_metrics(all_dice_scores, args.save_dir)
@@ -181,12 +189,12 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Visualize segmentation results")
-    parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset")
-    parser.add_argument("--model_path", type=str, default="best_model.pth", help="Path to model checkpoint")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
+    parser = argparse.ArgumentParser(description="Generate segmentation visualizations and metrics")
+    parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset root")
+    parser.add_argument("--model_path", type=str, default="best_model.pth", help="Path to trained model")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size for evaluation")
     parser.add_argument("--num_samples", type=int, default=3, help="Number of samples to visualize")
-    parser.add_argument("--save_dir", type=str, default=None, help="Directory to save visualizations (default: results folder in script directory)")
+    parser.add_argument("--save_dir", type=str, default=None, help="Output directory for visualizations")
     
     args = parser.parse_args()
     main(args)

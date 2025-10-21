@@ -3,18 +3,17 @@ import numpy as np
 from torch.utils.data import Dataset
 import os
 import nibabel as nib
-# You might need libraries like these for resizing/augmentation
-# import SimpleITK as sitk 
-# from scipy.ndimage import zoom
 
 class Prostate3DDataset(Dataset):
     def __init__(self, root_dir, split="train", transform=None, target_shape=(128, 128, 64)):
         """
+        Load 3D MRI dataset with semantic segmentation labels.
+        
         Args:
-            root_dir (string): Directory with all the images.
-            split (string): One of 'train', 'val', or 'test' to select the dataset split.
-            transform (callable, optional): Optional transform to be applied on a sample.
-            target_shape (tuple): The desired output shape (H, W, D) for cropping/padding.
+            root_dir: Path to dataset root directory
+            split: 'train', 'val', or 'test'
+            transform: Optional data augmentation transforms
+            target_shape: Output volume size (H, W, D)
         """
         self.img_dir = os.path.join(root_dir, "semantic_MRs")
         self.lbl_dir = os.path.join(root_dir, "semantic_labels_only")
@@ -23,9 +22,8 @@ class Prostate3DDataset(Dataset):
 
         all_files = sorted(os.listdir(self.img_dir))
         
-        # --- 1. IMPLEMENT DATA SPLITTING ---
-        # Create a deterministic split (e.g., 80% train, 10% val, 10% test)
-        np.random.seed(42) # for reproducibility
+        # Deterministic train/val/test split (80/10/10)
+        np.random.seed(42)
         np.random.shuffle(all_files)
         
         train_split = int(0.8 * len(all_files))
@@ -49,17 +47,14 @@ class Prostate3DDataset(Dataset):
         file_name = self.file_list[idx]
         img_path = os.path.join(self.img_dir, file_name)
         
-        # Convert image filename to label filename: replace _LFOV with _SEMANTIC
+        # Map image filename to corresponding label filename
         lbl_file_name = file_name.replace("_LFOV", "_SEMANTIC")
         lbl_path = os.path.join(self.lbl_dir, lbl_file_name)
 
         img = nib.load(img_path).get_fdata().astype(np.float32)
         lbl = nib.load(lbl_path).get_fdata().astype(np.int64)
         
-        # --- 2. IMPLEMENT UNIFORM INPUT SIZE ---
-        # Placeholder for resizing/cropping/padding logic
-        # For example, you could crop or pad to self.target_shape
-        # This is a very basic center crop example. A more robust solution is needed.
+        # Center crop to target shape
         h, w, d = img.shape
         th, tw, td = self.target_shape
         x1 = int(round((w - tw) / 2.))
@@ -68,18 +63,16 @@ class Prostate3DDataset(Dataset):
         img = img[y1:y1+th, x1:x1+tw, z1:z1+td]
         lbl = lbl[y1:y1+th, x1:x1+tw, z1:z1+td]
 
-        # Normalize
+        # Z-score normalization
         img = (img - img.mean()) / (img.std() + 1e-8)
         
-        # Convert to Tensor (C, H, W, D) - assuming your model expects this
-        # PyTorch standard is (C, D, H, W). Adjust if needed.
-        img = torch.from_numpy(img).unsqueeze(0) 
-        # --- 4. ADD CHANNEL DIM TO LABEL ---
+        # Convert to tensor with channel dimension (1, H, W, D)
+        img = torch.from_numpy(img).unsqueeze(0)
         lbl = torch.from_numpy(lbl).unsqueeze(0)
 
         sample = {"image": img, "label": lbl}
 
-        # --- 3. APPLY DATA AUGMENTATION ---
+        # Optional data augmentation
         if self.transform:
             sample = self.transform(sample)
             
@@ -87,19 +80,14 @@ class Prostate3DDataset(Dataset):
 if __name__ == "__main__":
     import argparse
 
-    # 1. Create argument parser
-    parser = argparse.ArgumentParser(description="Test the Prostate3DDataset loader.")
-    
-    # 2. Add command line argument --data_path with default path
+    parser = argparse.ArgumentParser(description="Test dataset loading")
     parser.add_argument("--data_path", type=str, 
                         default=r"C:\data\HipMRI_3D",
-                        help="Path to the root directory of the HipMRI dataset.")
+                        help="Path to dataset root directory")
     
-    # 3. Parse arguments
     args = parser.parse_args()
 
-    # 4. Use the parsed path to load data
-    print(f" Loading data from: {args.data_path}")
+    print(f"Loading data from: {args.data_path}")
     train_dataset = Prostate3DDataset(root_dir=args.data_path, split="train")
     
     if len(train_dataset) > 0:

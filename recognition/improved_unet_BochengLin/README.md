@@ -128,6 +128,15 @@ conda env create -f environment.yml
 conda activate unet3d
 ```
 
+### Data Path Configuration
+
+The dataset path needs to be specified for training and evaluation scripts. Update the path according to your local setup:
+
+```bash
+# Default path (modify as needed)
+DATA_PATH=C:\data\HipMRI_3D
+```
+
 ### Training
 
 ```bash
