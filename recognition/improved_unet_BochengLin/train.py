@@ -153,10 +153,6 @@ def main(args):
             best_dice = val_dice
             torch.save(model.state_dict(), best_model_path)
             print(f"Saved best model with Dice: {best_dice:.4f}")
-        
-        if best_dice >= args.target_dice:
-            print(f"Reached target Dice: {best_dice:.4f}")
-            break
     
     print(f"\nTraining completed. Best Dice: {best_dice:.4f}")
 
