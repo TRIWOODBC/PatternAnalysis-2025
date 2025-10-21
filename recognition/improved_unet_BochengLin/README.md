@@ -31,80 +31,145 @@ Total: ~17.5M parameters
 - Data split: 80% train / 10% val / 10% test
 - Early stopping: None (run full 100 epochs)
 
-### Project Structure
+## 3. How it Works
 
-- `dataset.py` - Prostate3DDataset class for loading and preprocessing 3D MRI data
-- `modules.py` - UNet3D_Improved model architecture with ConvBlock, DownBlock, UpBlock components
-- `train.py` - Training script with Dice loss, validation, and model checkpointing
-- `predict.py` - Inference script for evaluating on test set
-- `test_model.py` - Model validation script
+### Working Principle
 
-### Environment Setup
+The improved 3D U-Net uses an encoder-decoder architecture with key improvements over standard U-Net:
 
-Create the conda environment:
+1. **Encoder** progressively downsamples using **strided convolutions (stride=2)** instead of max-pooling (improvement: learnable downsampling preserves more information)
+2. **InstanceNorm + LeakyReLU** at each block (improvement: better for small batch sizes and smoother gradient flow)
+3. **Bottleneck** captures abstract features at the deepest level (320 channels)
+4. **Decoder** progressively upsamples with **ConvTranspose3d** and skip connections (recovers fine details)
+5. **Output layer** produces 6-channel prediction (one per class)
+
+During inference, argmax converts output to class labels.
+
+**Key Improvements:**
+- Strided convolutions: Learnable downsampling vs fixed pooling
+- Instance normalization: Better than batch norm for small batches
+- LeakyReLU: Avoids dead neurons, improves gradient flow
+
+### Architecture Diagram
 
 ```
+Input (1×128×128×64)
+    ↓
+[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
+    ↓ (64 ch)
+[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
+    ↓ (128 ch)
+[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
+    ↓ (256 ch)
+[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
+    ↓ (320 ch)
+[Conv + InstanceNorm + LeakyReLU] [Bottleneck]
+    ↓ (320 ch)
+ConvTranspose3d + Skip + [Conv Block] 
+    ↓ (256 ch)
+ConvTranspose3d + Skip + [Conv Block]
+    ↓ (128 ch)
+ConvTranspose3d + Skip + [Conv Block]
+    ↓ (64 ch)
+ConvTranspose3d + Skip + [Conv Block]
+    ↓ (32 ch)
+Output Conv (1×1×1, 6 classes)
+    ↓
+Output (6×128×128×64)
+```
 
-### Model Architecture
+### Segmentation Results
 
-The UNet3D_Improved model consists of:
+![Per-Class Dice Scores](results/per_class_dice.png)
 
-- **Encoder**: 5 levels with channel progression 32→64→128→256→320
-  - Uses strided convolutions for downsampling instead of max-pooling
-  - Each level has double convolution blocks with InstanceNorm and LeakyReLU
-  
-- **Decoder**: 4 levels with symmetric upsampling
-  - Uses ConvTranspose3d for upsampling
-  - Skip connections concatenate encoder features with decoder features
-  - Automatically handles odd dimension padding
+![Segmentation Example 1](results/segmentation_example_1.png)
 
-- **Output**: 1x1x1 convolution for final segmentation map
+![Segmentation Example 2](results/segmentation_example_2.png)
 
-Total parameters: ~17.5M
+![Segmentation Example 3](results/segmentation_example_3.png)
 
-### Dataset
+## 4. Dataset and Preprocessing
 
-The dataset is split into train/val/test sets (80/10/10 ratio):
+### Data
 
-- Images: 128×128×64 (3D volumes, center-cropped)
-- Labels: Semantic segmentation masks
-- Preprocessing: Normalization (z-score) applied to images
+3D MRI volumes with labels (6 classes: background + 5 tissue types)
 
-Data loading:
+### Processing
+
+- Center crop to 128×128×64 voxels
+- Z-score normalization per volume: $(x - \mu) / \sigma$
+- Labels: 0-5 (one-hot for training)
+
+### Split
+
+- Train: 80% (~170 samples)
+- Val: 10% (~21 samples)  
+- Test: 10% (~21 samples)
+
+Deterministic split for reproducibility.
+
+## 5. Project Structure
+
+- `dataset.py` - Prostate3DDataset class for loading and preprocessing 3D MRI data
+- `modules.py` - UNet3D_Improved model architecture
+- `train.py` - Training script with Dice loss and validation
+- `predict.py` - Evaluation script for computing per-class Dice
+- `visualize_results.py` - Generate segmentation visualizations and metrics
+- `test_model.py` - Model validation script
+- `best_model.pth` - Trained model weights
+- `environment.yml` - Conda environment configuration
+
+## 6. Usage
+
+### Setup Environment
 
 ```bash
-python dataset.py --data_path /path/to/HipMRI_3D
+conda env create -f environment.yml
+conda activate unet3d
 ```
 
 ### Training
 
-Train the model on train/val sets:
-
 ```bash
-python train.py --data_path /path/to/HipMRI_3D --batch_size 4 --lr 1e-4 --epochs 100
+python train.py --data_path C:\data\HipMRI_3D --batch_size 4 --lr 1e-4 --epochs 100
 ```
 
-Options:
-- `--data_path`: Path to dataset root directory
-- `--batch_size`: Batch size (default: 4)
-- `--lr`: Learning rate (default: 1e-4)
-- `--epochs`: Number of epochs (default: 100)
-- `--target_dice`: Target Dice coefficient for early stopping (default: 0.7)
-
-The training script:
-- Uses Dice loss for multi-class segmentation
-- Saves best model to `best_model.pth`
-- Logs training/validation metrics with progress bars
-- Uses learning rate scheduling (ReduceLROnPlateau)
-
-### Evaluation
-
-Evaluate the trained model on test set:
+### Evaluation on Test Set
 
 ```bash
-python predict.py --data_path /path/to/HipMRI_3D --model_path best_model.pth
+python predict.py --data_path C:\data\HipMRI_3D --model_path best_model.pth
 ```
 
-The evaluation script computes per-class Dice coefficients and overall performance.bash
-conda env create -f environment.yml
-conda activate unet3d
+### Generate Visualizations
+
+```bash
+python visualize_results.py --data_path C:\data\HipMRI_3D --num_samples 3
+```
+
+## 7. Dependencies
+
+- PyTorch >= 1.9.0
+- torchvision >= 0.10.0
+- numpy >= 1.19.0
+- nibabel >= 3.2.0
+- tqdm >= 4.50.0
+- matplotlib >= 3.3.0
+- Python >= 3.8
+
+See `environment.yml` for exact versions.
+
+## 8. Reproducibility
+
+- Fixed random seed in data splitting for deterministic train/val/test split
+- Model weights saved to `best_model.pth`
+- All hyperparameters configurable via command-line arguments
+- Preprocessing is deterministic (no random augmentation in prediction)
+
+## 9. References
+
+- U-Net: Convolutional Networks for Biomedical Image Segmentation (Ronneberger et al., 2015)
+- Instance Normalization: Ulyanov et al., 2016
+
+## 10. Acknowledgments
+
+This project was developed with assistance from GitHub Copilot.
