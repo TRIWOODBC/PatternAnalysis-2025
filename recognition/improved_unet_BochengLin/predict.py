@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 import argparse
+import os
 import numpy as np
 from tqdm import tqdm
 
@@ -84,8 +85,14 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate model on test set")
     parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset")
-    parser.add_argument("--model_path", type=str, default=r"recognition\improved_unet_BochengLin\results\best_model.pth", help="Path to model checkpoint")
+    parser.add_argument("--model_path", type=str, default=None, help="Path to model checkpoint (auto-detect if not provided)")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     
     args = parser.parse_args()
+    
+    # Auto-detect model path if not provided
+    if args.model_path is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        args.model_path = os.path.join(script_dir, "results", "best_model.pth")
+    
     main(args)

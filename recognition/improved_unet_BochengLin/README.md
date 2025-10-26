@@ -170,30 +170,79 @@ conda env create -f environment.yml
 conda activate unet3d
 ```
 
-### Training
+### Quick Start (Replace `/your/data/path` with your actual dataset path)
 
-```bash
-python train.py --data_path C:\data\HipMRI_3D --batch_size 4 --lr 1e-4 --epochs 100
+**Step 0: Prepare Your Dataset**
+
+Create the folder structure and place your data:
+```
+/your/data/path/
+├── semantic_MRs\           # Input 3D MRI volumes (*.nii.gz)
+└── semantic_labels_only\   # Segmentation labels (*.nii.gz)
 ```
 
-**Output**:
-- `results/best_model.pth` - Best model checkpoint (based on validation Dice)
-- `results/training_log.csv` - Per-epoch metrics (timestamp, epoch, losses, Dice, lr, is_best)
-- `results/training_history.json` - Complete training history in JSON format
-
-### Evaluation on Test Set
-
+**Step 1: Train the Model**
 ```bash
-python predict.py --data_path C:\data\HipMRI_3D --model_path recognition\improved_unet_BochengLin\results\best_model.pth --batch_size 4
+python train.py --data_path /your/data/path --batch_size 4 --lr 1e-4 --epochs 100
 ```
 
-**Expected Output**: Per-class Dice scores and overall mean Dice coefficient (target: ≥ 0.70)
+**Step 2: Evaluate on Test Set**
+```bash
+python predict.py --data_path /your/data/path --batch_size 4
+```
 
-### Generate Visualizations
+**Step 3: Generate Visualizations**
+```bash
+python visualize_results.py --data_path /your/data/path --num_samples 3
+```
+
+### Dataset Format
+
+Your dataset should have this structure:
+
+```
+/your/data/path/
+├── semantic_MRs\           # Input 3D MRI volumes
+│   ├── case_001.nii.gz
+│   ├── case_002.nii.gz
+│   └── ...
+└── semantic_labels_only\   # Segmentation labels
+    ├── case_001_SEMANTIC.nii.gz
+    ├── case_002_SEMANTIC.nii.gz
+    └── ...
+```
+
+The dataset loader will automatically:
+- Match image and label files by flexible naming patterns
+- Split data 80/10/10 into train/val/test (deterministic, seed=42)
+- Crop/pad volumes to 128×128×64
+- Normalize using Z-score with safe handling
+
+### Details for Each Step
+
+**Training:**
+- Initializes BraTS 2017 U-Net with Channel Attention (~8.9M parameters)
+- Combined loss: 0.5×DiceSquaredLoss + 0.5×FocalLoss
+- Adam optimizer (lr=1e-4, weight_decay=1e-5)
+- Early stopping when validation Dice ≥ 0.85
+- Saves: `best_model.pth`, `training_log.csv`, `training_history.json`
+- Time: ~7 min/epoch on 16GB GPU
+
+**Evaluation:**
+- Computes per-class Dice on test set
+- Model auto-detected from `results/best_model.pth`
+
+**Visualization:**
+- Generates segmentation examples and metrics plots
+- Saved to `results/` directory
+
+### Optional: Test Model Architecture
 
 ```bash
-python visualize_results.py --data_path C:\data\HipMRI_3D --num_samples 3
+python test_model.py
 ```
+
+Validates model forward/backward pass and compares attention vs non-attention variants.
 
 ## 7. Dependencies
 
