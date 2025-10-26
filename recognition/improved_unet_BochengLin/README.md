@@ -6,7 +6,42 @@
 ## 1. Problem Description
 This project implements a 6-class 3D segmenntation on the prostate 3D MRI dataset using an Improved UNet3D model. The goal is to achieve Dice >= 0.70 on all foreground classes.
 
-## 2. Algorithm Description
+## 2. Model Evolution & Design Decisions
+
+### Development Journey
+
+The model architecture evolved through several iterations to find the optimal balance between performance and efficiency:
+
+**v1: Baseline 3D U-Net (ConvBlock + DownBlockImproved + UpBlockImproved)**
+- Simple double-convolution blocks with strided downsampling
+- ConvTranspose3d for upsampling
+- Issue: Limited feature extraction, suboptimal convergence
+- Lesson: Need residual connections for better gradient flow
+
+**v2: CAN3D (Channel Attention Network 3D)**
+- Added coordinate attention mechanisms to the baseline
+- Goal: Improve feature channel importance weighting
+- Issue: **GPU memory explosion** - 16GB VRAM → OOM at epoch 2-3
+- Reason: Coordinate attention is too expensive for 3D volumetric data
+- Lesson: Attention mechanisms must be lightweight; spatial attention too costly for medical imaging
+
+**v3: BraTS 2017 U-Net (Current) ✅**
+- Proven architecture from BraTS 2017 Challenge winner (Isensee et al.)
+- Residual connections (ResidualContextBlock) for robust gradient flow
+- Strided convolutions for learnable downsampling
+- Trilinear interpolation for smooth upsampling
+- **Result:** Stable training, ~7 min/epoch on 16GB GPU, excellent convergence
+- Why this works: BraTS architecture is specifically designed for 3D medical imaging with practical GPU constraints
+
+### Why BraTS 2017?
+
+- ✅ Proven on real medical imaging challenge (brain tumor segmentation)
+- ✅ Fits in 16GB GPU memory with batch_size=4
+- ✅ Stable training with residual learning
+- ✅ Simpler than attention-based approaches without sacrificing performance
+- ✅ Faster than CAN3D: 7 min/epoch vs potential 15+ min/epoch
+
+## 3. Algorithm Description
 
 Uses the BraTS 2017 Challenge 3D U-Net architecture with the following key features:
 
@@ -37,7 +72,7 @@ Uses the BraTS 2017 Challenge 3D U-Net architecture with the following key featu
 - **Max Epochs**: 100
 - **Logging**: CSV + JSON training history with per-epoch metrics
 
-## 3. How it Works
+## 4. How it Works
 
 ### Working Principle
 
@@ -129,7 +164,7 @@ FL = -α(1-p)^γ log(p)
 
 ![Segmentation Example 3](results/segmentation_example_3.png)
 
-## 4. Dataset and Preprocessing
+## 5. Dataset and Preprocessing
 
 ### Data
 
@@ -150,7 +185,7 @@ FL = -α(1-p)^γ log(p)
 
 Deterministic split for reproducibility.
 
-## 5. Project Structure
+## 6. Project Structure
 
 - `dataset.py` - Prostate3DDataset class for loading and preprocessing 3D MRI data
 - `modules.py` - UNet3D_Improved model architecture
@@ -161,7 +196,7 @@ Deterministic split for reproducibility.
 - `best_model.pth` - Trained model weights
 - `environment.yml` - Conda environment configuration
 
-## 6. Usage
+## 7. Usage
 
 ### Setup Environment
 
@@ -244,7 +279,7 @@ python test_model.py
 
 Validates model forward/backward pass and compares attention vs non-attention variants.
 
-## 7. Dependencies
+## 8. Dependencies
 
 - PyTorch >= 1.9.0
 - torchvision >= 0.10.0
@@ -256,7 +291,7 @@ Validates model forward/backward pass and compares attention vs non-attention va
 
 See `environment.yml` for exact versions.
 
-## 8. Reproducibility
+## 9. Reproducibility
 
 - **Deterministic split**: Fixed random seed (seed=42) in data loading for reproducible train/val/test split
 - **Model checkpointing**: Best model saved to `results/best_model.pth` based on validation Dice
@@ -266,10 +301,10 @@ See `environment.yml` for exact versions.
 - **Hyperparameter configuration**: All parameters configurable via command-line arguments
 - **No random augmentation**: Preprocessing is deterministic (no augmentation during training or prediction)
 
-## 9. References
+## 10. References
 
 - Isensee et al., "Brain Tumor Segmentation and Radiomics Survival Prediction: Contribution to the BRATS 2017 Challenge", arXiv:1802.10508, 2018
 
-## 10. Acknowledgments
+## 11. Acknowledgments
 
-This project was developed with assistance from GitHub Copilot.
+This project was developed with AI-assisted code development using GitHub Copilot. All core architecture decisions, experiments, and analysis were done by the author, with Copilot providing code suggestions and implementation support.
