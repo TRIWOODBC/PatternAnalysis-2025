@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader
 import os
@@ -14,15 +15,15 @@ from dataset import Prostate3DDataset
 from modules import UNet3D_Improved
 
 
-class DiceLoss(nn.Module):
+class DiceSquaredLoss(nn.Module):
     """
-    Dice Loss for multi-class segmentation.
+    Dice² Loss for multi-class segmentation (CAN3D variant).
     
-    Converts predictions to probabilities, computes per-class intersection and union,
-    then takes the mean across all classes. Better than cross-entropy for imbalanced segmentation.
+    Squares the Dice coefficient to penalize small errors more heavily.
+    Better stability and focus on boundary/hard regions compared to standard Dice.
     """
     def __init__(self, smooth=1.0, num_classes=6):
-        super(DiceLoss, self).__init__()
+        super(DiceSquaredLoss, self).__init__()
         self.smooth = smooth
         self.num_classes = num_classes
 
@@ -32,7 +33,7 @@ class DiceLoss(nn.Module):
             pred: (B, C, H, W, D) logits from model
             target: (B, 1, H, W, D) integer class labels
         Returns:
-            Scalar loss value (1 - mean Dice)
+            Scalar loss value (1 - mean Dice²)
         """
         target_one_hot = torch.zeros_like(pred)
         for c in range(self.num_classes):
@@ -42,7 +43,74 @@ class DiceLoss(nn.Module):
         intersection = torch.sum(pred * target_one_hot, dim=(2, 3, 4))
         union = torch.sum(pred, dim=(2, 3, 4)) + torch.sum(target_one_hot, dim=(2, 3, 4))
         dice = (2.0 * intersection + self.smooth) / (union + self.smooth)
-        return 1.0 - dice.mean()
+        # Square the dice coefficient for harder penalty
+        return 1.0 - (dice ** 2).mean()
+
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for addressing class imbalance and hard examples.
+    
+    Down-weights easy negatives, focuses on hard positives and misclassified samples.
+    Useful for medical imaging with foreground/background imbalance.
+    """
+    def __init__(self, alpha=0.25, gamma=2.0, num_classes=6):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.num_classes = num_classes
+
+    def forward(self, pred, target):
+        """
+        Args:
+            pred: (B, C, H, W, D) logits from model
+            target: (B, 1, H, W, D) integer class labels
+        Returns:
+            Scalar focal loss value
+        """
+        # Reshape for cross-entropy
+        pred_flat = pred.permute(0, 2, 3, 4, 1).contiguous()
+        pred_flat = pred_flat.view(-1, self.num_classes)
+        target_flat = target.squeeze(1).contiguous().view(-1).long()
+        
+        # Cross-entropy
+        ce = F.cross_entropy(pred_flat, target_flat, reduction='none')
+        
+        # Focal term: (1 - p_t) ^ gamma
+        probs = torch.exp(-ce)
+        focal_weight = (1 - probs) ** self.gamma
+        
+        # Focal loss with alpha weighting
+        focal = self.alpha * focal_weight * ce
+        
+        return focal.mean()
+
+
+class CombinedLoss(nn.Module):
+    """
+    Combined Dice² + Focal Loss for CAN3D training.
+    
+    Balances volume-level accuracy (Dice²) with boundary/hard-sample focus (Focal).
+    Recommended weighting: 0.5 * Dice² + 0.5 * Focal for equal contribution.
+    """
+    def __init__(self, dice_weight=0.5, focal_weight=0.5, num_classes=6):
+        super(CombinedLoss, self).__init__()
+        self.dice_weight = dice_weight
+        self.focal_weight = focal_weight
+        self.dice_loss = DiceSquaredLoss(num_classes=num_classes)
+        self.focal_loss = FocalLoss(num_classes=num_classes)
+
+    def forward(self, pred, target):
+        """
+        Args:
+            pred: (B, C, H, W, D) logits
+            target: (B, 1, H, W, D) labels
+        Returns:
+            Combined loss: dice_weight * Dice² + focal_weight * Focal
+        """
+        dice = self.dice_loss(pred, target)
+        focal = self.focal_loss(pred, target)
+        return self.dice_weight * dice + self.focal_weight * focal
 
 
 class DiceCoefficient:
@@ -142,8 +210,8 @@ def validate(model, val_loader, criterion, device):
 
 def main(args):
     """
-    Train 3D U-Net with channel attention for prostate MRI segmentation.
-    Logs metrics to CSV and JSON, saves best model based on validation Dice.
+    Train CAN3D for prostate MRI segmentation.
+    Uses combined Dice² + Focal loss; logs metrics to CSV and JSON.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}")
@@ -153,8 +221,8 @@ def main(args):
     model = model.to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    # Setup loss and optimization
-    criterion = DiceLoss(num_classes=6)
+    # Setup loss and optimization (CAN3D: Dice² + Focal)
+    criterion = CombinedLoss(dice_weight=0.5, focal_weight=0.5, num_classes=6)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True)
     
@@ -243,7 +311,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train 3D U-Net with channel attention for prostate segmentation")
+    parser = argparse.ArgumentParser(description="Train CAN3D (Context Aggregation Network 3D) for prostate segmentation")
     parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset root directory")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size (default: 4)")
     parser.add_argument("--lr", type=float, default=1e-4, help="Initial learning rate (default: 1e-4)")
