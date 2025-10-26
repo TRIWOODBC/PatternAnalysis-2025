@@ -6,6 +6,9 @@ import os
 import argparse
 from tqdm import tqdm
 import numpy as np
+import csv
+import json
+from datetime import datetime
 
 from dataset import Prostate3DDataset
 from modules import UNet3D_Improved
@@ -146,27 +149,77 @@ def main(args):
     print(f"Train samples: {len(train_dataset)}")
     print(f"Val samples: {len(val_dataset)}")
     
+    # Prepare results/logging directory
+    results_dir = os.path.join(os.path.dirname(__file__), 'results')
+    os.makedirs(results_dir, exist_ok=True)
+
     # Training loop
     best_dice = 0.0
-    best_model_path = "best_model.pth"
+    best_model_path = os.path.join(results_dir, "best_model.pth")
+
+    # Logging files
+    log_csv_path = os.path.join(results_dir, 'training_log.csv')
+    history_json_path = os.path.join(results_dir, 'training_history.json')
+
+    # If CSV doesn't exist, write header
+    if not os.path.exists(log_csv_path):
+        with open(log_csv_path, 'w', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow(['timestamp', 'epoch', 'train_loss', 'val_loss', 'val_dice', 'lr', 'is_best'])
+
+    # In-memory history for JSON
+    history = []
     
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
-        
         train_loss = train_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_dice = validate(model, val_loader, criterion, device)
-        
+
         print(f"Train Loss: {train_loss:.4f}")
         print(f"Val Loss: {val_loss:.4f}")
         print(f"Val Dice: {val_dice:.4f}")
-        
+
         scheduler.step(val_dice)
-        
+
+        # Current learning rate
+        try:
+            current_lr = optimizer.param_groups[0]['lr']
+        except Exception:
+            current_lr = None
+
+        # Determine if this is a new best
+        is_best = False
         if val_dice > best_dice:
             best_dice = val_dice
             torch.save(model.state_dict(), best_model_path)
+            is_best = True
             print(f"Saved best model with Dice: {best_dice:.4f}")
+
+        # Append CSV log
+        timestamp = datetime.now().isoformat()
+        with open(log_csv_path, 'a', newline='', encoding='utf-8') as csvfile:
+            writer = csv.writer(csvfile)
+            writer.writerow([timestamp, epoch + 1, f"{train_loss:.6f}", f"{val_loss:.6f}", f"{val_dice:.6f}", f"{current_lr}", int(is_best)])
+
+        # Append to in-memory history
+        history.append({
+            'timestamp': timestamp,
+            'epoch': epoch + 1,
+            'train_loss': float(train_loss),
+            'val_loss': float(val_loss),
+            'val_dice': float(val_dice),
+            'lr': float(current_lr) if current_lr is not None else None,
+            'is_best': bool(is_best)
+        })
     
+    # Save history JSON
+    try:
+        with open(history_json_path, 'w', encoding='utf-8') as jf:
+            json.dump(history, jf, indent=2)
+        print(f"Saved training history to: {history_json_path}")
+    except Exception as e:
+        print(f"Warning: could not save history JSON: {e}")
+
     print(f"\nTraining completed. Best Dice: {best_dice:.4f}")
 
 
