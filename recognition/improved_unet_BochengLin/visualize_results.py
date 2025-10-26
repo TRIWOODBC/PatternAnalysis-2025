@@ -191,7 +191,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate segmentation visualizations and metrics")
     parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset root")
-    parser.add_argument("--model_path", type=str, default="best_model.pth", help="Path to trained model")
+    parser.add_argument("--model_path", type=str, default=r"recognition\improved_unet_BochengLin\results\best_model.pth", help="Path to trained model")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for evaluation")
     parser.add_argument("--num_samples", type=int, default=3, help="Number of samples to visualize")
     parser.add_argument("--save_dir", type=str, default=None, help="Output directory for visualizations")

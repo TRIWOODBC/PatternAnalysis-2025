@@ -84,7 +84,7 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Evaluate model on test set")
     parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset")
-    parser.add_argument("--model_path", type=str, default="best_model.pth", help="Path to model checkpoint")
+    parser.add_argument("--model_path", type=str, default=r"recognition\improved_unet_BochengLin\results\best_model.pth", help="Path to model checkpoint")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
     
     args = parser.parse_args()

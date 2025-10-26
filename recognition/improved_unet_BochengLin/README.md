@@ -8,75 +8,116 @@ This project implements a 6-class 3D segmenntation on the prostate 3D MRI datase
 
 ## 2. Algorithm Description
 
-Uses a 3D U-Net architecture with the following improvements:
+Uses the BraTS 2017 Challenge 3D U-Net architecture with the following key features:
 
-- **Encoder-Decoder with Skip Connections**: Standard U-Net structure but with strided convolutions (Conv3d stride=2) instead of max-pooling for downsampling
-- **Instance Norm**: Works better than batch norm when batch size is small (4 in this case)
-- **LeakyReLU**: Better gradient flow compared to ReLU
-- **Dice Loss**: Optimizes directly for segmentation IoU, handles class imbalance well
+- **ResidualContextBlock**: Residual learning with 2×Conv3d blocks, Instance Normalization, LeakyReLU, and Dropout(0.3) between convolutions
+- **Strided Convolutions**: Learnable downsampling with stride-2 convolutions instead of max-pooling
+- **Trilinear Interpolation**: Upsampling without transposed convolutions (avoids checkerboard artifacts)
+- **Instance Normalization**: Better than batch norm for small batch sizes (4 in this case)
+- **LeakyReLU(0.01)**: Improved gradient flow compared to ReLU
+- **Combined Loss**: 50% Dice² + 50% Focal Loss for better handling of hard examples and class imbalance
 - **6-class Output**: Background + 5 tissue classes
 
 ### Model Details
 
-Encoder: 5 levels (1 → 64 → 128 → 256 → 320 channels)
-Decoder: 4 levels with symmetric upsampling and skip connections
-Total: ~17.5M parameters
+- **Architecture**: 4-level encoder-decoder with 3 downsampling levels + bottleneck
+- **Encoder**: Conv blocks at levels 1,2,3 + bottleneck (1 → 32 → 64 → 128 → 256 channels)
+- **Decoder**: Symmetric upsampling with skip connections from encoder (256 → 128 → 64 → 32 → 6 classes)
+- **Total Parameters**: ~8.9M (lightweight for 16GB GPU with batch_size=4)
+- **Training Speed**: ~7 minutes per epoch
 
 ### Training Setup
 
-- Optimizer: Adam (lr=1e-4, weight_decay=1e-5)
-- Loss: Dice Loss
-- Learning rate: Reduce by 0.5× if validation Dice doesn't improve for 5 epochs
-- Batch size: 4
-- Data split: 80% train / 10% val / 10% test
-- Early stopping: None (run full 100 epochs)
+- **Optimizer**: Adam (lr=1e-4, weight_decay=1e-5)
+- **Loss Function**: 0.5×DiceSquaredLoss + 0.5×FocalLoss (α=0.25, γ=2.0)
+- **Learning Rate Schedule**: ReduceLROnPlateau (factor=0.5, patience=5 epochs)
+- **Batch Size**: 4
+- **Data Split**: 80% train / 10% val / 10% test (deterministic seed=42)
+- **Early Stopping**: Stop when validation Dice ≥ 0.85
+- **Max Epochs**: 100
+- **Logging**: CSV + JSON training history with per-epoch metrics
 
 ## 3. How it Works
 
 ### Working Principle
 
-The improved 3D U-Net uses an encoder-decoder architecture with key improvements over standard U-Net:
+The BraTS 2017 U-Net uses an encoder-decoder architecture with residual learning:
 
-1. **Encoder** progressively downsamples using **strided convolutions (stride=2)** instead of max-pooling (improvement: learnable downsampling preserves more information)
-2. **InstanceNorm + LeakyReLU** at each block (improvement: better for small batch sizes and smoother gradient flow)
-3. **Bottleneck** captures abstract features at the deepest level (320 channels)
-4. **Decoder** progressively upsamples with **ConvTranspose3d** and skip connections (recovers fine details)
-5. **Output layer** produces 6-channel prediction (one per class)
+1. **Encoder** (3 levels + bottleneck): 
+   - ResidualContextBlock: 2×Conv3d(3×3×3) + InstanceNorm + LeakyReLU + Dropout(0.3) + residual skip
+   - DownsampleBlock: Stride-2 convolution for learnable downsampling (no pooling)
+   - Progressively increases channels: 32 → 64 → 128 → 256
 
-During inference, argmax converts output to class labels.
+2. **Bottleneck** (deepest level):
+   - ResidualContextBlock at 256 channels captures abstract volumetric features
 
-**Key Improvements:**
-- Strided convolutions: Learnable downsampling vs fixed pooling
-- Instance normalization: Better than batch norm for small batches
-- LeakyReLU: Avoids dead neurons, improves gradient flow
+3. **Decoder** (3 levels):
+   - UpsampleBlock: Trilinear interpolation (scale factor 2) + Conv3d
+   - Skip connections: Concatenate upsampled features with encoder features
+   - ResidualContextBlock: Process concatenated features
+   - Progressively decreases channels: 256 → 128 → 64 → 32
+
+4. **Output layer**: 1×1×1 convolution produces 6-channel prediction (one per class)
+
+During inference, argmax converts logits to class labels.
+
+**Key Design Decisions:**
+- **Residual Learning**: Skip connections improve gradient flow and feature reuse
+- **Dropout(0.3)**: Regularization between Conv blocks to prevent overfitting
+- **InstanceNorm**: Better than BatchNorm for small batch sizes
+- **Trilinear Upsampling**: Smooth interpolation without checkerboard artifacts from transposed convolutions
+- **Strided Convolutions**: Learnable downsampling preserves more information than fixed pooling
+- **Combined Loss (Dice² + Focal)**: Focuses on hard examples and class boundaries
 
 ### Architecture Diagram
 
 ```
 Input (1×128×128×64)
     ↓
-[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
-    ↓ (64 ch)
-[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
-    ↓ (128 ch)
-[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
-    ↓ (256 ch)
-[Conv + InstanceNorm + LeakyReLU] → Strided Conv (stride 2)
-    ↓ (320 ch)
-[Conv + InstanceNorm + LeakyReLU] [Bottleneck]
-    ↓ (320 ch)
-ConvTranspose3d + Skip + [Conv Block] 
-    ↓ (256 ch)
-ConvTranspose3d + Skip + [Conv Block]
-    ↓ (128 ch)
-ConvTranspose3d + Skip + [Conv Block]
-    ↓ (64 ch)
-ConvTranspose3d + Skip + [Conv Block]
-    ↓ (32 ch)
-Output Conv (1×1×1, 6 classes)
+enc1: ResidualContextBlock (32 ch)
+    ↓
+down1: DownsampleBlock stride=2 (32→64 ch)
+    ↓
+enc2: ResidualContextBlock (64 ch)
+    ↓
+down2: DownsampleBlock stride=2 (64→128 ch)
+    ↓
+enc3: ResidualContextBlock (128 ch)
+    ↓
+down3: DownsampleBlock stride=2 (128→256 ch)
+    ↓
+bottleneck: ResidualContextBlock (256 ch)
+    ↓
+up3: UpsampleBlock trilinear (256→128 ch)
+    ↓
+dec3: ResidualContextBlock (128+128→128 ch with skip)
+    ↓
+up2: UpsampleBlock trilinear (128→64 ch)
+    ↓
+dec2: ResidualContextBlock (64+64→64 ch with skip)
+    ↓
+up1: UpsampleBlock trilinear (64→32 ch)
+    ↓
+dec1: ResidualContextBlock (32+32→32 ch with skip)
+    ↓
+out_conv: Conv3d(1×1×1) → 6 classes
     ↓
 Output (6×128×128×64)
 ```
+
+### Loss Function
+
+**DiceSquaredLoss**: Squares the Dice coefficient for harder penalty on small errors
+```
+Dice² = (2 * TP + ε) / (TP + FP + FN + ε)²
+```
+
+**FocalLoss**: Focuses on hard examples with α=0.25, γ=2.0
+```
+FL = -α(1-p)^γ log(p)
+```
+
+**Combined Loss**: 0.5×Dice² + 0.5×FocalLoss
 
 ### Segmentation Results
 
@@ -96,9 +137,10 @@ Output (6×128×128×64)
 
 ### Processing
 
-- Center crop to 128×128×64 voxels
-- Z-score normalization per volume: $(x - \mu) / \sigma$
-- Labels: 0-5 (one-hot for training)
+- **Center crop/pad to 128×128×64 voxels**: Adaptive cropping for oversized volumes, zero-padding for undersized volumes, centered to preserve region-of-interest
+- **Safe Z-score normalization**: Per-volume $(x - \mu) / \sigma$ with small constant (ε=1e-8) to handle near-constant volumes
+- **Robust label file matching**: Automatically finds corresponding label files using flexible naming patterns (_LFOV, _MR, etc.)
+- **Labels**: 0-5 (6 classes: background + 5 tissue types)
 
 ### Split
 
@@ -128,26 +170,24 @@ conda env create -f environment.yml
 conda activate unet3d
 ```
 
-### Data Path Configuration
-
-The dataset path needs to be specified for training and evaluation scripts. Update the path according to your local setup:
-
-```bash
-# Default path (modify as needed)
-DATA_PATH=C:\data\HipMRI_3D
-```
-
 ### Training
 
 ```bash
 python train.py --data_path C:\data\HipMRI_3D --batch_size 4 --lr 1e-4 --epochs 100
 ```
 
+**Output**:
+- `results/best_model.pth` - Best model checkpoint (based on validation Dice)
+- `results/training_log.csv` - Per-epoch metrics (timestamp, epoch, losses, Dice, lr, is_best)
+- `results/training_history.json` - Complete training history in JSON format
+
 ### Evaluation on Test Set
 
 ```bash
-python predict.py --data_path C:\data\HipMRI_3D --model_path best_model.pth
+python predict.py --data_path C:\data\HipMRI_3D --model_path recognition\improved_unet_BochengLin\results\best_model.pth --batch_size 4
 ```
+
+**Expected Output**: Per-class Dice scores and overall mean Dice coefficient (target: ≥ 0.70)
 
 ### Generate Visualizations
 
@@ -169,15 +209,17 @@ See `environment.yml` for exact versions.
 
 ## 8. Reproducibility
 
-- Fixed random seed in data splitting for deterministic train/val/test split
-- Model weights saved to `best_model.pth`
-- All hyperparameters configurable via command-line arguments
-- Preprocessing is deterministic (no random augmentation in prediction)
+- **Deterministic split**: Fixed random seed (seed=42) in data loading for reproducible train/val/test split
+- **Model checkpointing**: Best model saved to `results/best_model.pth` based on validation Dice
+- **Training logs**: 
+  - `training_log.csv`: Per-epoch metrics for easy analysis in Excel/pandas
+  - `training_history.json`: Complete history with timestamps for detailed tracking
+- **Hyperparameter configuration**: All parameters configurable via command-line arguments
+- **No random augmentation**: Preprocessing is deterministic (no augmentation during training or prediction)
 
 ## 9. References
 
-- U-Net: Convolutional Networks for Biomedical Image Segmentation (Ronneberger et al., 2015)
-- Instance Normalization: Ulyanov et al., 2016
+- Isensee et al., "Brain Tumor Segmentation and Radiomics Survival Prediction: Contribution to the BRATS 2017 Challenge", arXiv:1802.10508, 2018
 
 ## 10. Acknowledgments
 
