@@ -15,14 +15,25 @@ from modules import UNet3D_Improved
 
 
 class DiceLoss(nn.Module):
-    """Dice Loss for multi-class segmentation."""
+    """
+    Dice Loss for multi-class segmentation.
+    
+    Converts predictions to probabilities, computes per-class intersection and union,
+    then takes the mean across all classes. Better than cross-entropy for imbalanced segmentation.
+    """
     def __init__(self, smooth=1.0, num_classes=6):
         super(DiceLoss, self).__init__()
         self.smooth = smooth
         self.num_classes = num_classes
 
     def forward(self, pred, target):
-        """pred: (B, C, H, W, D), target: (B, 1, H, W, D)"""
+        """
+        Args:
+            pred: (B, C, H, W, D) logits from model
+            target: (B, 1, H, W, D) integer class labels
+        Returns:
+            Scalar loss value (1 - mean Dice)
+        """
         target_one_hot = torch.zeros_like(pred)
         for c in range(self.num_classes):
             target_one_hot[:, c] = (target.squeeze(1) == c).float()
@@ -35,13 +46,24 @@ class DiceLoss(nn.Module):
 
 
 class DiceCoefficient:
-    """Compute Dice coefficient for validation."""
+    """
+    Compute mean Dice coefficient for validation.
+    
+    Argmax predictions to get class assignments, then compute per-class Dice
+    and average across all classes. Used to track segmentation quality during training.
+    """
     def __init__(self, smooth=1.0, num_classes=6):
         self.smooth = smooth
         self.num_classes = num_classes
 
     def compute(self, pred, target):
-        """pred: (B, C, H, W, D), target: (B, 1, H, W, D)"""
+        """
+        Args:
+            pred: (B, C, H, W, D) model logits
+            target: (B, 1, H, W, D) integer labels
+        Returns:
+            Mean Dice score across all classes
+        """
         pred = torch.argmax(pred, dim=1, keepdim=True)
         dice_scores = []
         
@@ -60,7 +82,12 @@ class DiceCoefficient:
 
 
 def train_epoch(model, train_loader, criterion, optimizer, device):
-    """Train one epoch."""
+    """
+    Train model for one epoch.
+    
+    Iterates through training batches, computes loss, and updates weights.
+    Returns average loss across all batches.
+    """
     model.train()
     total_loss = 0.0
     pbar = tqdm(train_loader, desc="Training", ncols=100)
@@ -83,7 +110,12 @@ def train_epoch(model, train_loader, criterion, optimizer, device):
 
 
 def validate(model, val_loader, criterion, device):
-    """Validate on val set and return loss and Dice."""
+    """
+    Validate model on validation set.
+    
+    Evaluates loss and Dice coefficient without gradient computation.
+    Returns average loss and Dice score for the entire validation set.
+    """
     model.eval()
     total_loss = 0.0
     dice_metric = DiceCoefficient(num_classes=6)
@@ -96,12 +128,6 @@ def validate(model, val_loader, criterion, device):
             labels = batch["label"].to(device)
             
             outputs = model(images)
-            
-            # Debug: print shapes and value ranges
-            if batch_idx == 0:
-                print(f"\nDebug - Outputs shape: {outputs.shape}, range: [{outputs.min():.4f}, {outputs.max():.4f}]")
-                print(f"Debug - Labels shape: {labels.shape}, unique values: {torch.unique(labels)}")
-            
             loss = criterion(outputs, labels)
             total_loss += loss.item()
             
@@ -116,30 +142,23 @@ def validate(model, val_loader, criterion, device):
 
 def main(args):
     """
-    Train 3D U-Net model for prostate MRI segmentation.
-    
-    Training workflow:
-    1. Initialize model and move to device (CPU/GPU)
-    2. Setup Dice loss and Adam optimizer
-    3. Load train/val datasets
-    4. Train for specified epochs with validation
-    5. Save best model based on validation Dice
-    6. Use learning rate scheduling to adjust learning rate
+    Train 3D U-Net with channel attention for prostate MRI segmentation.
+    Logs metrics to CSV and JSON, saves best model based on validation Dice.
     """
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"Device: {device}")
     
-    # Create model - 6 classes (0,1,2,3,4,5)
+    # Initialize model with 6 classes for prostate regions
     model = UNet3D_Improved(in_channels=1, num_classes=6)
     model = model.to(device)
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
-    # Loss and optimizer
+    # Setup loss and optimization
     criterion = DiceLoss(num_classes=6)
     optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-5)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5, verbose=True)
     
-    # Data loaders
+    # Load datasets with deterministic 80/10/10 split
     train_dataset = Prostate3DDataset(root_dir=args.data_path, split="train")
     val_dataset = Prostate3DDataset(root_dir=args.data_path, split="val")
     
@@ -224,12 +243,11 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train 3D U-Net for prostate segmentation")
-    parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset")
-    parser.add_argument("--batch_size", type=int, default=4, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--epochs", type=int, default=100, help="Number of epochs")
-    parser.add_argument("--target_dice", type=float, default=0.7, help="Target Dice coefficient")
+    parser = argparse.ArgumentParser(description="Train 3D U-Net with channel attention for prostate segmentation")
+    parser.add_argument("--data_path", type=str, default=r"C:\data\HipMRI_3D", help="Path to dataset root directory")
+    parser.add_argument("--batch_size", type=int, default=4, help="Batch size (default: 4)")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Initial learning rate (default: 1e-4)")
+    parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs (default: 100)")
     
     args = parser.parse_args()
     main(args)

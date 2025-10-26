@@ -3,8 +3,45 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+class ChannelAttention3d(nn.Module):
+    """
+    Channel attention mechanism for 3D features.
+    
+    Uses both average and max pooling to capture channel statistics,
+    then applies a lightweight MLP to learn channel importance weights.
+    This allows the network to adaptively recalibrate feature maps.
+    """
+    def __init__(self, channels, reduction=16):
+        super().__init__()
+        self.avg_pool = nn.AdaptiveAvgPool3d(1)
+        self.max_pool = nn.AdaptiveMaxPool3d(1)
+        
+        # Lightweight MLP with bottleneck
+        mid_channels = max(channels // reduction, 1)
+        self.mlp = nn.Sequential(
+            nn.Conv3d(channels, mid_channels, kernel_size=1),
+            nn.ReLU(inplace=True),
+            nn.Conv3d(mid_channels, channels, kernel_size=1)
+        )
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Get channel attention weights from both pooling strategies
+        avg_out = self.mlp(self.avg_pool(x))
+        max_out = self.mlp(self.max_pool(x))
+        
+        # Combine and apply sigmoid to get weights in [0, 1]
+        out = avg_out + max_out
+        return x * self.sigmoid(out)
+
+
 class ConvBlock(nn.Module):
-    """Double convolution: Conv3d + InstanceNorm + LeakyReLU, repeated twice."""
+    """
+    Standard 3D convolution block with two conv layers.
+    
+    Each layer includes: Conv3d -> InstanceNorm -> LeakyReLU
+    Instance norm works well with small batch sizes in medical imaging.
+    """
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.conv_block = nn.Sequential(
@@ -21,7 +58,12 @@ class ConvBlock(nn.Module):
 
 
 class DownBlockImproved(nn.Module):
-    """Downsampling with strided convolution instead of max-pooling."""
+    """
+    Encoding block with learned downsampling.
+    
+    Uses strided convolution instead of max-pooling, which allows
+    the network to learn the best way to downsample for this task.
+    """
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.downsample_conv = nn.Sequential(
@@ -36,17 +78,25 @@ class DownBlockImproved(nn.Module):
 
 
 class UpBlockImproved(nn.Module):
-    """Upsampling with ConvTranspose3d and skip connection concatenation."""
+    """
+    Decoding block with channel attention.
+    
+    Combines upsampling, skip connections, and adaptive channel attention
+    to refocus on the most informative features during reconstruction.
+    """
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.up = nn.ConvTranspose3d(in_channels, out_channels, kernel_size=2, stride=2)
-        # Concatenation doubles channels: out_channels * 2
+        # After concatenation with skip connection, we have double the channels
         self.conv = ConvBlock(out_channels * 2, out_channels)
+        # Learn which channels matter most at this level
+        self.attention = ChannelAttention3d(out_channels)
 
     def forward(self, x1, x2):
+        # Upsample the deeper feature map
         x1 = self.up(x1)
         
-        # Pad to match skip connection size (handles odd dimensions)
+        # Pad to match skip connection size (handles odd-sized volumes)
         diffZ = x2.size()[2] - x1.size()[2]
         diffY = x2.size()[3] - x1.size()[3]
         diffX = x2.size()[4] - x1.size()[4]
@@ -55,13 +105,18 @@ class UpBlockImproved(nn.Module):
                         diffY // 2, diffY - diffY // 2,
                         diffZ // 2, diffZ - diffZ // 2])
         
-        # Concatenate with skip connection
+        # Merge upsampled features with skip connection
         x = torch.cat([x2, x1], dim=1)
-        return self.conv(x)
+        x = self.conv(x)
+        
+        # Adaptively weight channels using attention
+        x = self.attention(x)
+        
+        return x
 
 
 class OutConv(nn.Module):
-    """1x1x1 convolution for final output."""
+    """Final output layer: reduces features to class predictions."""
     def __init__(self, in_channels, out_channels):
         super(OutConv, self).__init__()
         self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=1)
@@ -72,53 +127,46 @@ class OutConv(nn.Module):
 
 class UNet3D_Improved(nn.Module):
     """
-    3D U-Net architecture for semantic segmentation.
+    3D U-Net with channel attention for medical image segmentation.
     
-    Encoder: 1 -> 32 -> 64 -> 128 -> 256 -> 320 channels (downsampling)
-    Decoder: 320 -> 256 -> 128 -> 64 -> 32 channels (upsampling with skip connections)
-    Output: num_classes channels
-    
-    Key features:
-    - Strided convolutions for downsampling (learnable)
-    - Instance normalization (better for small batch sizes)
-    - LeakyReLU activations
-    - Skip connections to preserve fine details
+    Encoder-decoder with skip connections and attention at each decoder stage.
+    Designed for 3D medical imaging with small batch sizes.
     """
     def __init__(self, in_channels, num_classes):
         super(UNet3D_Improved, self).__init__()
         self.in_channels = in_channels
         self.num_classes = num_classes
 
-        # Encoder
+        # Downsampling path (encoder)
         self.inc = ConvBlock(in_channels, 32)
         self.down1 = DownBlockImproved(32, 64)
         self.down2 = DownBlockImproved(64, 128)
         self.down3 = DownBlockImproved(128, 256)
         self.down4 = DownBlockImproved(256, 320)
 
-        # Decoder
+        # Upsampling path (decoder) with attention
         self.up1 = UpBlockImproved(320, 256)
         self.up2 = UpBlockImproved(256, 128)
         self.up3 = UpBlockImproved(128, 64)
         self.up4 = UpBlockImproved(64, 32)
         
-        # Output
+        # Final output
         self.outc = OutConv(32, num_classes)
 
     def forward(self, x):
-        # Encoder
+        # Encoder: extract multi-scale features
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
         x4 = self.down3(x3)
         x5 = self.down4(x4)
         
-        # Decoder with skip connections
+        # Decoder: reconstruct with skip connections and attention
         x = self.up1(x5, x4)
         x = self.up2(x, x3)
         x = self.up3(x, x2)
         x = self.up4(x, x1)
         
-        # Output
+        # Output: class predictions
         logits = self.outc(x)
         return logits
