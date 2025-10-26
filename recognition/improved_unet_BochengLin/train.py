@@ -256,6 +256,7 @@ def main(args):
 
     # In-memory history for JSON
     history = []
+    target_dice = 0.85  # Early stopping threshold
     
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
@@ -267,6 +268,23 @@ def main(args):
         print(f"Val Dice: {val_dice:.4f}")
 
         scheduler.step(val_dice)
+        
+        # Early stopping: stop if validation Dice reaches target
+        if val_dice >= target_dice:
+            print(f"\n✓ Reached target Dice {target_dice}! Stopping training.")
+            is_best = True
+            torch.save(model.state_dict(), best_model_path)
+            timestamp = datetime.now().isoformat()
+            history.append({
+                'timestamp': timestamp,
+                'epoch': epoch + 1,
+                'train_loss': float(train_loss),
+                'val_loss': float(val_loss),
+                'val_dice': float(val_dice),
+                'lr': float(optimizer.param_groups[0]['lr']) if optimizer.param_groups[0]['lr'] is not None else None,
+                'is_best': True
+            })
+            break
 
         # Current learning rate
         try:
