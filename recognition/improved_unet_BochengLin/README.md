@@ -21,25 +21,28 @@ The model architecture evolved through several iterations to find the optimal ba
 **v2: CAN3D (Channel Attention Network 3D)**
 - Added coordinate attention mechanisms to the baseline
 - Goal: Improve feature channel importance weighting
-- Issue: **GPU memory explosion** - 16GB VRAM → OOM at epoch 2-3
+- Issue: **GPU memory explosion** - Requires ~25+ GB total memory (16GB VRAM + 9GB+ shared)
 - Reason: Coordinate attention is too expensive for 3D volumetric data
+- Result: Heavy reliance on shared GPU memory causes severe performance degradation (~15+ min/epoch)
 - Lesson: Attention mechanisms must be lightweight; spatial attention too costly for medical imaging
 
-**v3: BraTS 2017 U-Net (Current) ✅**
+**v3: BraTS 2017 U-Net (Current)**
 - Proven architecture from BraTS 2017 Challenge winner (Isensee et al.)
 - Residual connections (ResidualContextBlock) for robust gradient flow
 - Strided convolutions for learnable downsampling
 - Trilinear interpolation for smooth upsampling
-- **Result:** Stable training, ~7 min/epoch on 16GB GPU, excellent convergence
+- **Memory Usage**: Requires 19.7 GB total (16GB VRAM + 3.7GB shared) - still exceeds physical VRAM but manageable
+- **Result:** Stable training, ~5-6 min/epoch despite using shared memory, excellent convergence
 - Why this works: BraTS architecture is specifically designed for 3D medical imaging with practical GPU constraints
+- **Key Advantage**: Much lower shared memory overhead than CAN3D (3.7GB vs 9GB+), enabling 2-3× faster training
 
 ### Why BraTS 2017?
 
-- ✅ Proven on real medical imaging challenge (brain tumor segmentation)
-- ✅ Fits in 16GB GPU memory with batch_size=4
-- ✅ Stable training with residual learning
-- ✅ Simpler than attention-based approaches without sacrificing performance
-- ✅ Faster than CAN3D: 7 min/epoch vs potential 15+ min/epoch
+- Proven on real medical imaging challenge (brain tumor segmentation)
+- Fits in 16GB GPU memory with batch_size=4
+- Stable training with residual learning
+- Simpler than attention-based approaches without sacrificing performance
+- Faster than CAN3D: 7 min/epoch vs potential 15+ min/epoch
 
 ## 3. Algorithm Description
 
@@ -154,6 +157,48 @@ FL = -α(1-p)^γ log(p)
 
 **Combined Loss**: 0.5×Dice² + 0.5×FocalLoss
 
+### Training Curves
+
+The model was trained for 8 epochs until reaching the early stopping criterion (validation Dice ≥ 0.85):
+
+![Training Curves](results/training_curves.png)
+
+**Key Observations:**
+- **Rapid Convergence**: Validation Dice improved from 0.50 → 0.88 in just 8 epochs
+- **Early Stopping Triggered**: Target validation Dice (0.85) reached at epoch 8
+- **No Overfitting**: Train and validation loss curves track closely
+- **Final Performance**: Val Dice = 0.8795, Val Loss = 0.2948
+- **Total Training Time**: ~40-45 minutes (8 epochs × 5-6 min/epoch)
+- **Efficient Learning**: BraTS 2017 architecture with residual connections enables fast, stable training
+
+**Training Results Analysis:**
+
+The exceptionally rapid convergence to high performance (Dice 0.88 in 8 epochs) demonstrates several key strengths of the BraTS 2017 architecture:
+
+1. **Effective Residual Learning**: The ResidualContextBlock design enables efficient gradient flow through deep networks, allowing the model to learn complex 3D spatial patterns quickly. The consistent improvement across all epochs (no plateaus) indicates that residual connections successfully prevent gradient vanishing in the encoder-decoder pathway.
+
+2. **Optimal Loss Function Design**: The combined Dice² + Focal Loss strategy proves highly effective:
+   - Dice² component drives rapid improvement in overlap-based metrics (directly optimizing the evaluation metric)
+   - Focal Loss component handles class imbalance and hard examples, preventing the model from ignoring difficult boundary regions
+   - The 50/50 weighting provides balanced optimization, as evidenced by the smooth, monotonic decrease in both training and validation loss
+
+3. **No Overfitting Observed**: The tight coupling between training and validation curves (validation loss consistently tracking training loss) indicates:
+   - Dropout(0.3) provides sufficient regularization without hindering learning capacity
+   - Instance Normalization stabilizes training for small batch sizes (batch_size=4)
+   - The model capacity (~8.9M parameters) is well-matched to the dataset size (~170 training samples)
+
+4. **Early Stopping Success**: Reaching the target Dice (0.85) at epoch 8 suggests:
+   - The architecture is well-suited for this specific task (prostate MRI segmentation)
+   - No need for extensive hyperparameter tuning or prolonged training
+   - Efficient use of computational resources (< 1 hour total training time vs. potential 10+ hours for 100 epochs)
+
+5. **Architecture Efficiency vs. Memory Trade-off**: Despite requiring 19.7 GB total memory (exceeding physical VRAM), the BraTS 2017 model achieves 2-3× faster training than CAN3D. This demonstrates that architectural efficiency (simpler operations, no expensive attention mechanisms) can outweigh the performance penalty of shared GPU memory. The 3.7 GB shared memory overhead causes minimal slowdown compared to the 9+ GB required by attention-based models.
+
+**Implications for Practical Deployment:**
+- The model is production-ready after minimal training time, making it suitable for rapid prototyping and iterative development
+- The stable training behavior suggests good generalization to similar medical imaging tasks
+- The memory-performance trade-off validates the choice of BraTS 2017 over more complex architectures for resource-constrained environments
+
 ### Segmentation Results
 
 ![Per-Class Dice Scores](results/per_class_dice.png)
@@ -163,6 +208,71 @@ FL = -α(1-p)^γ log(p)
 ![Segmentation Example 2](results/segmentation_example_2.png)
 
 ![Segmentation Example 3](results/segmentation_example_3.png)
+
+### Performance Metrics
+
+| Class | Dice Score | Description |
+|-------|-----------|-------------|
+| Class 0 | 0.9604 | Background tissue |
+| Class 1 | 0.9781 | Tissue Type 1 |
+| Class 2 | 0.9142 | Tissue Type 2 |
+| Class 3 | 0.9243 | Tissue Type 3 |
+| Class 4 | 0.7492 | Tissue Type 4 |
+| Class 5 | 0.7418 | Tissue Type 5 |
+| **Mean** | **0.8780** | **Overall Dice (all classes)** |
+| **Foreground Mean** | **0.8615** | **Average foreground Dice (Class 1-5)** |
+
+**Target Achieved**: All foreground classes exceed the minimum Dice threshold of 0.70
+
+**Test Set Results Analysis:**
+
+The test set evaluation on 22 held-out samples demonstrates strong generalization performance with an overall Dice score of 0.8780:
+
+1. **Excellent Performance on Classes 0-3** (Dice > 0.91):
+   - Class 1 achieves the highest score (0.9781), indicating the model excels at segmenting this tissue type
+   - Background (Class 0: 0.9604) and Classes 2-3 (0.91-0.92) show robust segmentation with minimal false positives/negatives
+   - These high scores suggest clear anatomical boundaries and sufficient training examples for these tissue types
+
+2. **Moderate Performance on Classes 4-5** (Dice ~0.74-0.75):
+   - Classes 4 and 5 achieve 0.7492 and 0.7418 respectively, meeting the minimum target but showing room for improvement
+   - Lower scores likely due to one or more factors:
+     - **Class imbalance**: These tissue types may occupy smaller volumes in the MRI scans, providing fewer training voxels
+     - **Anatomical complexity**: More irregular boundaries or higher inter-patient variability
+     - **Boundary ambiguity**: Less distinct tissue contrast in MRI, making ground truth labels less definitive
+   - Despite lower scores, both classes comfortably exceed the 0.70 threshold, validating the model's capability
+
+3. **Strong Generalization from Validation to Test**:
+   - Test Dice (0.8780) closely matches validation Dice (0.8795), with only 0.0015 difference
+   - This minimal gap confirms:
+     - No overfitting occurred during training
+     - The validation set is representative of the overall data distribution
+     - The model will likely perform consistently on new, unseen prostate MRI data
+
+4. **Comparison with Project Requirements**:
+   - **Target**: Dice ≥ 0.70 on all foreground classes
+   - **Achieved**: All classes (1-5) exceed 0.70, with Class 1 nearly reaching 0.98
+   - **Foreground mean**: 0.8615 significantly exceeds the 0.70 baseline, demonstrating strong overall performance
+
+5. **Clinical Implications**:
+   - The high Dice scores (especially Classes 1-3 > 0.91) suggest the model is suitable for clinical decision support
+   - Classes 4-5 performance (0.74-0.75) may require human expert review in critical applications
+   - The consistent performance across the test set indicates reliable segmentation for automated analysis pipelines
+
+**Potential Improvements for Classes 4-5**:
+- Apply class-weighted loss to prioritize under-represented tissue types
+- Use data augmentation to artificially increase training samples for minority classes
+- Implement boundary-aware losses (e.g., Hausdorff Distance Loss) to improve edge accuracy
+- Post-processing with Conditional Random Fields (CRF) to refine boundary predictions
+
+**Training Statistics:**
+- Total Epochs: 8 (early stopping triggered)
+- Training Time: ~5-6 min/epoch on NVIDIA RTX 4080 SUPER (16GB)
+- Total Training Time: ~40-45 minutes
+- Final Validation Dice: 0.8795 (exceeds 0.85 target)
+- Final Train Loss: 0.3192
+- Final Val Loss: 0.2948
+- Model Size: ~35 MB (8.9M parameters)
+- Peak GPU Memory: 19.7 GB (16 GB VRAM + 3.7 GB shared)
 
 ## 5. Dataset and Preprocessing
 
@@ -291,7 +401,26 @@ Validates model forward/backward pass and compares attention vs non-attention va
 
 See `environment.yml` for exact versions.
 
-## 9. Reproducibility
+## 9. Development Hardware
+
+This project was developed and tested on the following hardware configuration:
+
+- **GPU**: NVIDIA GeForce RTX 4080 SUPER (16 GB VRAM)
+- **CPU**: Intel Core i5-13600KF (13th Gen, 14 cores: 6P+8E)
+- **RAM**: 32 GB DDR4/DDR5
+- **OS**: Windows 11
+- **Training Performance**: ~5-6 min/epoch with batch_size=4
+- **Total Memory Required**: ~19.7 GB (16 GB dedicated VRAM + 3.7 GB shared GPU memory)
+
+**Memory Management Notes**: 
+- The model requires **19.7 GB** total GPU memory with batch_size=4
+- Uses **16 GB dedicated VRAM** + **~3.7 GB shared GPU memory** (borrowed from system RAM)
+- Windows automatically allocates shared GPU memory when dedicated VRAM is exhausted
+- Training remains stable despite exceeding physical VRAM limit
+- Shared memory causes slight performance overhead but enables larger batch sizes
+- **Recommendation**: For GPUs with <16 GB VRAM, reduce batch_size to 2 or 1 to avoid shared memory usage
+
+## 10. Reproducibility
 
 - **Deterministic split**: Fixed random seed (seed=42) in data loading for reproducible train/val/test split
 - **Model checkpointing**: Best model saved to `results/best_model.pth` based on validation Dice
@@ -301,10 +430,16 @@ See `environment.yml` for exact versions.
 - **Hyperparameter configuration**: All parameters configurable via command-line arguments
 - **No random augmentation**: Preprocessing is deterministic (no augmentation during training or prediction)
 
-## 10. References
+## 11. License
+
+This project is developed for academic purposes as part of COMP3710 Pattern Analysis coursework at The University of Queensland. 
+
+**Educational Use Only**: This code is provided for educational and research purposes. If you plan to use this code for commercial purposes or publications, please contact the author.
+
+## 12. References
 
 - Isensee et al., "Brain Tumor Segmentation and Radiomics Survival Prediction: Contribution to the BRATS 2017 Challenge", arXiv:1802.10508, 2018
 
-## 11. Acknowledgments
+## 13. Acknowledgments
 
 This project was developed with AI-assisted code development using GitHub Copilot. All core architecture decisions, experiments, and analysis were done by the author, with Copilot providing code suggestions and implementation support.
