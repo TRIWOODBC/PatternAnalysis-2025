@@ -5,6 +5,7 @@ import matplotlib.patches as mpatches
 from torch.utils.data import DataLoader
 import argparse
 import os
+import json
 
 from dataset import Prostate3DDataset
 from modules import UNet3D_Improved
@@ -142,6 +143,72 @@ def plot_metrics(all_dice_scores, save_dir=None):
     plt.close()
 
 
+def plot_training_curves(save_dir=None):
+    """Generate and save training curves from training_history.json."""
+    
+    if save_dir is None:
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        save_dir = os.path.join(script_dir, "results")
+    
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    # Load training history
+    history_path = os.path.join(save_dir, "training_history.json")
+    if not os.path.exists(history_path):
+        print(f"Warning: {history_path} not found. Skipping training curves.")
+        return
+    
+    with open(history_path, 'r') as f:
+        history = json.load(f)
+    
+    # Extract data
+    epochs = [h['epoch'] for h in history]
+    train_loss = [h['train_loss'] for h in history]
+    val_loss = [h['val_loss'] for h in history]
+    val_dice = [h['val_dice'] for h in history]
+    
+    # Create figure with 2 subplots
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Plot 1: Loss curves
+    ax1.plot(epochs, train_loss, 'b-o', label='Train Loss', linewidth=2, markersize=6)
+    ax1.plot(epochs, val_loss, 'r-s', label='Val Loss', linewidth=2, markersize=6)
+    ax1.set_xlabel('Epoch', fontsize=12)
+    ax1.set_ylabel('Loss', fontsize=12)
+    ax1.set_title('Training and Validation Loss', fontsize=14, fontweight='bold')
+    ax1.legend(fontsize=11)
+    ax1.grid(True, alpha=0.3)
+    ax1.set_xticks(epochs)
+    
+    # Plot 2: Validation Dice Score
+    ax2.plot(epochs, val_dice, 'g-^', label='Val Dice Score', linewidth=2, markersize=6)
+    ax2.axhline(y=0.85, color='orange', linestyle='--', linewidth=2, label='Early Stopping Target (0.85)')
+    ax2.axhline(y=0.70, color='red', linestyle='--', linewidth=2, label='Minimum Target (0.70)')
+    ax2.set_xlabel('Epoch', fontsize=12)
+    ax2.set_ylabel('Dice Score', fontsize=12)
+    ax2.set_title('Validation Dice Score', fontsize=14, fontweight='bold')
+    ax2.legend(fontsize=11)
+    ax2.grid(True, alpha=0.3)
+    ax2.set_xticks(epochs)
+    ax2.set_ylim([0.4, 1.0])
+    
+    plt.tight_layout()
+    save_path = os.path.join(save_dir, "training_curves.png")
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"Saved: {save_path}")
+    plt.close()
+    
+    # Print summary statistics
+    print("\n📊 Training Summary:")
+    print(f"  • Total Epochs: {len(epochs)}")
+    print(f"  • Final Train Loss: {train_loss[-1]:.4f}")
+    print(f"  • Final Val Loss: {val_loss[-1]:.4f}")
+    print(f"  • Final Val Dice: {val_dice[-1]:.4f}")
+    print(f"  • Best Val Dice: {max(val_dice):.4f} (Epoch {epochs[val_dice.index(max(val_dice))]})")
+    print(f"  • Early Stopping Target (0.85) Reached: {'✅ Yes' if max(val_dice) >= 0.85 else '❌ No'}\n")
+
+
 def main(args):
     """Generate segmentation visualizations and performance metrics."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -166,6 +233,10 @@ def main(args):
     
     # Generate segmentation visualizations
     visualize_segmentation(model, test_loader, device, args.num_samples, args.save_dir)
+    
+    # Plot training curves from training history
+    print("Generating training curves...")
+    plot_training_curves(args.save_dir)
     
     # Compute and plot Dice metrics
     print("Computing per-class Dice scores...")
