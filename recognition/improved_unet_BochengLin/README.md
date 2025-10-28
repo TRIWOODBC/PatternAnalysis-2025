@@ -3,6 +3,35 @@
 **Author**: Bocheng Lin 48275565
 **Project**: COMP3710 Pattern Analysis Report - Project 7 (Hard Difficulty)
 
+## Table of Contents
+
+1. [Problem Description](#1-problem-description)
+2. [Model Evolution & Design Decisions](#2-model-evolution--design-decisions)
+   - [Development Journey](#development-journey)
+   - [Why BraTS 2017?](#why-brats-2017)
+3. [Algorithm Description](#3-algorithm-description)
+   - [Model Details](#model-details)
+   - [Training Setup](#training-setup)
+4. [How it Works](#4-how-it-works)
+   - [Working Principle](#working-principle)
+   - [Architecture Diagram](#architecture-diagram)
+   - [Loss Function](#loss-function)
+   - [Training Curves](#training-curves)
+   - [Segmentation Results](#segmentation-results)
+   - [Performance Metrics](#performance-metrics)
+5. [Dataset and Preprocessing](#5-dataset-and-preprocessing)
+6. [Project Structure](#6-project-structure)
+7. [Usage](#7-usage)
+   - [Setup Environment](#setup-environment)
+   - [Quick Start](#quick-start-replace-yourdatapath-with-your-actual-dataset-path)
+   - [Dataset Format](#dataset-format)
+8. [Dependencies](#8-dependencies)
+9. [Development Hardware](#9-development-hardware)
+10. [Reproducibility](#10-reproducibility)
+11. [License](#11-license)
+12. [References](#12-references)
+13. [Acknowledgments](#13-acknowledgments)
+
 ## 1. Problem Description
 This project implements a 6-class 3D segmenntation on the prostate 3D MRI dataset using an Improved UNet3D model. The goal is to achieve Dice >= 0.70 on all foreground classes.
 
