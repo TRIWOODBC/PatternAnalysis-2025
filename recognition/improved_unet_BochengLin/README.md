@@ -187,6 +187,7 @@ FL = -α(1-p)^γ log(p)
 **Combined Loss**: 0.5×Dice² + 0.5×FocalLoss
 
 ### Training Curves
+**Note on reported results:** The training curves and numeric results shown below (for example, "Val Dice = 0.8795" and "8 epochs") are example outcomes from the author's experiments. They depend on the exact dataset split, random seed, hardware, and software environment used by the author; your results may differ. See the Reproducibility section for details on seed, splits, and how to reproduce the experiments.
 
 The model was trained for 8 epochs until reaching the early stopping criterion (validation Dice ≥ 0.85):
 
@@ -332,7 +333,6 @@ Deterministic split for reproducibility.
 - `predict.py` - Evaluation script for computing per-class Dice
 - `visualize_results.py` - Generate segmentation visualizations and metrics
 - `test_model.py` - Model validation script
-- `best_model.pth` - Trained model weights
 - `environment.yml` - Conda environment configuration
 
 ## 7. Usage
@@ -440,6 +440,28 @@ Validates model forward/backward pass and compares attention vs non-attention va
 
 See `environment.yml` for exact versions.
 
+Note (about CUDA / PyTorch builds): the PyTorch wheel referenced in `environment.yml` may include a CUDA build suffix (for example `+cu124`). Please install the PyTorch build that matches your system CUDA version, or install the CPU-only PyTorch build if you do not have a supported GPU. If you are unsure which build to use, consult the official PyTorch install page: https://pytorch.org/get-started/locally/
+
+Example installation snippets:
+
+- CUDA 11.8 (conda)
+```bash
+conda create -n unet3d python=3.10 -y
+conda activate unet3d
+conda install pytorch torchvision pytorch-cuda=11.8 -c pytorch -c nvidia
+```
+
+- CPU-only (pip)
+```bash
+pip install --upgrade pip
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+```
+
+After installing the correct PyTorch build, install the remaining Python packages from `environment.yml` (or via pip):
+```bash
+pip install numpy nibabel tqdm matplotlib scikit-image pillow
+```
+
 ## 9. Development Hardware
 
 This project was developed and tested on the following hardware configuration:
@@ -458,6 +480,14 @@ This project was developed and tested on the following hardware configuration:
 - Training remains stable despite exceeding physical VRAM limit
 - Shared memory causes slight performance overhead but enables larger batch sizes
 - **Recommendation**: For GPUs with <16 GB VRAM, reduce batch_size to 2 or 1 to avoid shared memory usage
+
+If you run into out-of-memory errors, try one or more of the following:
+
+- Reduce the training batch size (e.g., `--batch_size 1`).
+- Reduce model width by lowering `base_filters` (for example, set `base_filters=16` when constructing `modules.UNet3D_Improved`).
+- Crop or downsample the input volume (e.g., use 96×96×48 instead of 128×128×64) to reduce per-sample memory footprint.
+- Enable mixed-precision training (AMP) to cut memory usage, but use this cautiously and validate numerical stability.
+
 
 ## 10. Reproducibility
 

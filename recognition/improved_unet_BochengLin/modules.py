@@ -96,7 +96,7 @@ class UNet3D_Improved(nn.Module):
     Reference:
         Isensee et al., arXiv:1802.10508
     """
-    def __init__(self, in_channels=1, num_classes=3, base_filters=32):
+    def __init__(self, in_channels=1, num_classes=6, base_filters=32):
         super().__init__()
 
         # ---------- Encoder path ----------
