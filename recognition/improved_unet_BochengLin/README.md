@@ -337,6 +337,16 @@ Deterministic split for reproducibility.
 
 ## 7. Usage
 
+### Get the code
+
+Clone the repository and switch to the branch used for this project. Replace the URL with your fork if you prefer:
+
+```bash
+git clone https://github.com/TRIWOODBC/PatternAnalysis-2025.git
+cd PatternAnalysis-2025
+git checkout topic-recognition
+```
+
 ### Setup Environment
 
 ```bash
